@@ -10,7 +10,7 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
-console.log("🚀 Kazeno Backend Server (Session Checker v6) စတင်လည်ပတ်နေပါပြီ...");
+console.log("🚀 Kazeno Backend Server (PH Persistence v7) စတင်လည်ပတ်နေပါပြီ...");
 
 db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => {
     snapshot.docChanges().forEach(async (change) => {
@@ -45,38 +45,47 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
                     try {
                         await page.setViewport({ width: 1280, height: 800 }); 
 
-                        // 💡 (၁) Cookie များကို ပိုမိုသေချာအောင် ထည့်သွင်းခြင်း
+                        // 💡 (၁) Cookie များကို Domain ပေါင်းစုံအတွက် သတ်မှတ်ခြင်း
                         if (!smileCookie) throw new Error("Cookie မရှိပါ။");
                         const cookieArray = smileCookie.split(';').map(pair => {
                             let [name, ...value] = pair.split('=');
                             if(!name) return null;
-                            return { name: name.trim(), value: value.join('=').trim(), domain: '.smile.one', path: '/' };
-                        }).filter(c => c !== null);
+                            let v = value.join('=').trim();
+                            return [
+                                { name: name.trim(), value: v, domain: '.smile.one', path: '/' },
+                                { name: name.trim(), value: v, domain: 'www.smile.one', path: '/' }
+                            ];
+                        }).flat().filter(c => c !== null);
                         await page.setCookie(...cookieArray);
 
-                        // 💡 (၂) အရင်ဆုံး အကောင့်ထဲဝင်မဝင် စစ်ဆေးရန် Homepage သို့သွားမည်
-                        await page.goto('https://www.smile.one/', { waitUntil: 'networkidle2', timeout: 60000 });
-                        
-                        // "Entrar" သို့မဟုတ် "Login" စာသားရှိနေပါက အကောင့်မဝင်ရသေးဟု သတ်မှတ်မည်
-                        const isLoggedOut = await page.evaluate(() => {
-                            const text = document.body.innerText.toLowerCase();
-                            return text.includes('entrar') || text.includes('sign in') || text.includes('login');
-                        });
+                        // 💡 (၂) PH Server တိုက်ရိုက်လင့်ခ်သို့ အတင်းသွားမည်
+                        const targetUrl = 'https://www.smile.one/ph/merchant/mobilelegends?source=other';
+                        await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+                        await new Promise(r => setTimeout(r, 4000));
 
-                        if (isLoggedOut) {
-                            throw new Error("Login Failed: စက်ရုပ်သည် အကောင့်ထဲသို့ ဝင်ရောက်နိုင်ခြင်းမရှိပါ။ Cookie အသစ်ပြန်ထည့်ပေးပါ။");
+                        // 💡 (၃) Brazil သို့ Redirect ဖြစ်သွားသလား စစ်ဆေးခြင်း
+                        const currentUrl = page.url();
+                        if (!currentUrl.includes('/ph/')) {
+                            console.log("Redirected to non-PH page. Re-navigating...");
+                            await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+                            await new Promise(r => setTimeout(r, 3000));
                         }
-
-                        // 💡 (၃) အကောင့်ဝင်ပြီးသားဖြစ်ပါက Product Page သို့သွားမည်
-                        await page.goto('https://www.smile.one/ph/merchant/mobilelegends?source=other', { waitUntil: 'networkidle2', timeout: 60000 });
-                        await new Promise(r => setTimeout(r, 2000));
 
                         // Popup ပိတ်ခြင်း
                         await page.evaluate(() => {
-                            document.querySelectorAll('.system_install_cancel, .close-btn, #system_install_cancel').forEach(el => el.click());
+                            document.querySelectorAll('.system_install_cancel, .close-btn, #system_install_cancel, .layui-layer-close').forEach(el => el.click());
                         });
 
-                        // 💡 (၄) ID ထည့်ခြင်း
+                        // 💡 (၄) အကောင့်ဝင်မဝင် အတိအကျ စစ်ဆေးခြင်း
+                        const isLoggedOut = await page.evaluate(() => {
+                            return document.body.innerText.includes('Entrar') || document.body.innerText.includes('Login');
+                        });
+
+                        if (isLoggedOut) {
+                            throw new Error("Login Failed: စက်ရုပ်သည် အကောင့်ထဲသို့ ဝင်ရောက်နိုင်ခြင်းမရှိပါ။");
+                        }
+
+                        // 💡 (၅) ID ထည့်ခြင်း
                         const idSelector = 'input[name="userid"]';
                         await page.waitForSelector(idSelector, { visible: true, timeout: 15000 });
 
@@ -85,16 +94,31 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
                             const zoneInp = document.querySelector('input[name="zoneid"]');
                             const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                             
-                            if (idInp) { setter.call(idInp, uid); idInp.dispatchEvent(new Event('input', { bubbles: true })); }
-                            if (zoneInp && zid) { setter.call(zoneInp, zid); zoneInp.dispatchEvent(new Event('input', { bubbles: true })); }
+                            if (idInp) { 
+                                setter.call(idInp, uid); 
+                                idInp.dispatchEvent(new Event('input', { bubbles: true })); 
+                                idInp.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                            if (zoneInp && zid) { 
+                                setter.call(zoneInp, zid); 
+                                zoneInp.dispatchEvent(new Event('input', { bubbles: true }));
+                                zoneInp.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
                             
                             const pBox = document.querySelector(`[data-id="${pid}"]`);
                             if(pBox) pBox.click();
                         }, userId, zoneId, productData.smileId);
 
-                        await new Promise(r => setTimeout(r, 1000));
+                        await new Promise(r => setTimeout(r, 2000));
                         await page.click('.buy-btn, #buy_btn');
-                        await new Promise(r => setTimeout(r, 4000));
+                        await new Promise(r => setTimeout(r, 5000));
+
+                        // 📸 ဓာတ်ပုံရိုက်ယူခြင်း
+                        try {
+                            const base64Img = await page.screenshot({ encoding: 'base64' });
+                            const imgRes = await axios.post('https://api.imgbb.com/1/upload?key=f0d759dd374df91104867c6701e199f2', `image=${encodeURIComponent(base64Img)}`, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }});
+                            finalScreenshotUrl = imgRes.data.data.url;
+                        } catch(e) {}
 
                         // စာသားဖတ်ခြင်း
                         const uiMessage = await page.evaluate(() => {
@@ -110,12 +134,14 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
                         await db.collection('orders').doc(orderId).update({ status: 'Completed' });
 
                     } catch (err) {
-                        // 📸 Error တက်တက်ချင်း ဓာတ်ပုံချက်ချင်းရိုက်မည်
-                        try {
-                            const base64Img = await page.screenshot({ encoding: 'base64' });
-                            const imgRes = await axios.post('https://api.imgbb.com/1/upload?key=f0d759dd374df91104867c6701e199f2', `image=${encodeURIComponent(base64Img)}`, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }});
-                            finalScreenshotUrl = imgRes.data.data.url;
-                        } catch(e) {}
+                        // Error တက်ပါက ဓာတ်ပုံရိုက်မည်
+                        if (page && !finalScreenshotUrl) {
+                            try {
+                                const base64Img = await page.screenshot({ encoding: 'base64' });
+                                const imgRes = await axios.post('https://api.imgbb.com/1/upload?key=f0d759dd374df91104867c6701e199f2', `image=${encodeURIComponent(base64Img)}`, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }});
+                                finalScreenshotUrl = imgRes.data.data.url;
+                            } catch(e) {}
+                        }
                         throw err; 
                     } finally {
                         await browser.close(); 
@@ -127,7 +153,7 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
                 const config = configDoc.data() || {};
                 if(config.tgBotToken && config.tgChatId) {
                     let tgText = `⚠️ <b>AUTO-TOPUP FAILED</b> ⚠️\nOrder: ${order.orderId}\nReason: ${error.message}`;
-                    if(finalScreenshotUrl) tgText += `\n\n📸 <a href="${finalScreenshotUrl}">စက်ရုပ်အမှန်တကယ်မြင်နေရသည့်ပုံ</a>`;
+                    if(finalScreenshotUrl) tgText += `\n\n📸 <a href="${finalScreenshotUrl}">စက်ရုပ်မြင်နေရသည့်ပုံ</a>`;
                     await axios.post(`https://api.telegram.org/bot${config.tgBotToken}/sendMessage`, { chat_id: config.tgChatId, text: tgText, parse_mode: "HTML", message_thread_id: config.tgOrderTopicId ? parseInt(config.tgOrderTopicId) : undefined });
                 }
             }
@@ -135,6 +161,6 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
     });
 });
 
-app.get('/', (req, res) => { res.send('✅ Kazeno Backend v6 is Active'); });
+app.get('/', (req, res) => { res.send('✅ Kazeno Backend PH-v7 Active'); });
 app.listen(PORT, () => { console.log(`Server running`); });
 
