@@ -13,7 +13,7 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
-console.log("🚀 Kazeno Backend Server (Force Inject V12) စတင်လည်ပတ်နေပါပြီ...");
+console.log("🚀 Kazeno Backend Server (Strict Product Select V13) စတင်လည်ပတ်နေပါပြီ...");
 
 db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => {
     snapshot.docChanges().forEach(async (change) => {
@@ -53,28 +53,19 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
                         await page.setViewport({ width: 1280, height: 800 }); 
 
                         let parsedCookies = [];
-                        try {
-                            parsedCookies = JSON.parse(cookieString);
-                        } catch(e) {
-                            throw new Error("Cookie ဖော်မတ်မှားနေပါသည်။");
-                        }
+                        try { parsedCookies = JSON.parse(cookieString); } 
+                        catch(e) { throw new Error("Cookie ဖော်မတ်မှားနေပါသည်။"); }
                         await page.setCookie(...parsedCookies);
 
                         await page.goto('https://www.smile.one/ph/merchant/mobilelegends', { waitUntil: 'networkidle2', timeout: 60000 });
-                        
-                        // 💡 စာမျက်နှာ အပြည့်တက်ရန် (၅) စက္ကန့် သေချာစောင့်မည် 💡
-                        await new Promise(r => setTimeout(r, 5000));
+                        await new Promise(r => setTimeout(r, 4000));
 
                         const isLoggedOut = await page.evaluate(() => document.body.innerText.includes('Entrar') || document.body.innerText.includes('Login'));
                         if (isLoggedOut) throw new Error("Login Failed: Cookie သက်တမ်းကုန်နေပါသည်။");
 
-                        await page.evaluate(() => {
-                            document.querySelectorAll('.system_install_cancel, .close-btn, #system_install_cancel, .layui-layer-close').forEach(el => el.click());
-                        });
-
                         // 💡 အမြင်အာရုံ (Selector) မစောင့်တော့ဘဲ Code ထဲမှ အတင်းရှာ၍ ထည့်ခြင်း 💡
-                        await page.evaluate((uid, zid, pid) => {
-                            // ID အကွက် အားလုံးကို ရှာပြီး ထည့်မည်
+                        const isProductClicked = await page.evaluate((uid, zid, pid) => {
+                            // ၁။ ID အကွက် အားလုံးကို ရှာပြီး ထည့်မည်
                             const idInputs = document.querySelectorAll('input[name="userid"], .userid');
                             const zoneInputs = document.querySelectorAll('input[name="zoneid"], .zoneid');
                             const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
@@ -91,35 +82,66 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
                                 });
                             }
                             
-                            // CSV မှ Smile ID ဖြင့် Product အတိအကျကို ရွေးချယ်ခြင်း
-                            const pBox = document.querySelector(`[id="${pid}"]`) || document.querySelector(`[data-id="${pid}"]`);
-                            if(pBox) pBox.click();
-
+                            // ၂။ 💡 Product အတိအကျကို နည်းလမ်းပေါင်းစုံဖြင့် ရှာဖွေခြင်း 💡
+                            const selectors = [
+                                `[productid="${pid}"]`,
+                                `[data-id="${pid}"]`,
+                                `[id="${pid}"]`,
+                                `li[productid="${pid}"]`,
+                                `.product-item[data-id="${pid}"]`
+                            ];
+                            
+                            let foundAndClicked = false;
+                            for (let sel of selectors) {
+                                let el = document.querySelector(sel);
+                                if (el) {
+                                    el.click();
+                                    foundAndClicked = true;
+                                    break; // ရှာတွေ့လျှင် ရပ်မည်
+                                }
+                            }
+                            return foundAndClicked;
                         }, userId, zoneId, productData.smileId);
+
+                        // 💡 ပစ္စည်းကို မတွေ့ပါက ချက်ချင်း Error ပြမည် 💡
+                        if (!isProductClicked) {
+                            throw new Error(`စာမျက်နှာပေါ်တွင် ပစ္စည်း (Smile ID: ${productData.smileId}) ကို ရှာမတွေ့ပါ။ စိန်ပမာဏ မှန်ကန်မှုရှိမရှိ စစ်ဆေးပါ။`);
+                        }
 
                         await new Promise(r => setTimeout(r, 2000));
                         
-                        // Buy နှိပ်ခြင်း
+                        // ၃။ Buy နှိပ်ခြင်း
                         await page.evaluate(() => {
-                            let buyBtn = document.querySelector('.buy-btn') || document.querySelector('#buy_btn');
+                            let buyBtn = document.querySelector('.buy-btn, #buy_btn, .btn-pay');
                             if(buyBtn) buyBtn.click();
                         });
                         console.log(`⏳ [${order.orderId}] ဝယ်ယူရန် နှိပ်လိုက်ပါပြီ။`);
                         
-                        await new Promise(r => setTimeout(r, 6000));
+                        await new Promise(r => setTimeout(r, 2000));
 
+                        // ၄။ 💡 အတည်ပြု (Confirm) ခလုတ် ထပ်ပေါ်လာပါက နှိပ်ပေးခြင်း 💡
+                        await page.evaluate(() => {
+                            let confirmBtn = document.querySelector('.swal2-confirm, #confirm-btn, .confirm-pay');
+                            if(confirmBtn) confirmBtn.click();
+                        });
+
+                        await new Promise(r => setTimeout(r, 5000));
+
+                        // 📸 ဓာတ်ပုံရိုက်မည်
                         try {
                             const base64Img = await page.screenshot({ encoding: 'base64' });
                             const imgRes = await axios.post('https://api.imgbb.com/1/upload?key=f0d759dd374df91104867c6701e199f2', `image=${encodeURIComponent(base64Img)}`, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }});
                             finalScreenshotUrl = imgRes.data.data.url;
                         } catch(e) {}
 
+                        // စာသားဖတ်မည်
                         const uiMessage = await page.evaluate(() => {
                             let msg = "";
-                            document.querySelectorAll('.layui-layer-content, .swal2-html-container, .error-msg').forEach(p => msg += p.innerText);
+                            document.querySelectorAll('.layui-layer-content, .swal2-html-container, .error-msg, .toast-message').forEach(p => msg += p.innerText);
                             return msg;
                         });
 
+                        // "success" မပါရင် ဒါမှမဟုတ် "Please select" လို Error မျိုးတွေ့ရင် ပိတ်ချမည်
                         if (uiMessage && !uiMessage.toLowerCase().includes('success') && !uiMessage.toLowerCase().includes('အောင်မြင်')) {
                             throw new Error(`Smile One: "${uiMessage}"`);
                         }
@@ -160,6 +182,5 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
     });
 });
 
-app.get('/', (req, res) => { res.send('✅ Kazeno Backend Final V12 Active'); });
+app.get('/', (req, res) => { res.send('✅ Kazeno Backend Strict V13 Active'); });
 app.listen(PORT, () => { console.log(`Server running`); });
-
