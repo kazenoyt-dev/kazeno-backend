@@ -13,7 +13,7 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
-console.log("🚀 Kazeno Backend Server (Strict Product Select V13) စတင်လည်ပတ်နေပါပြီ...");
+console.log("🚀 Kazeno Backend Server (Smile Coin Auto-Select V14) စတင်လည်ပတ်နေပါပြီ...");
 
 db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => {
     snapshot.docChanges().forEach(async (change) => {
@@ -63,63 +63,73 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
                         const isLoggedOut = await page.evaluate(() => document.body.innerText.includes('Entrar') || document.body.innerText.includes('Login'));
                         if (isLoggedOut) throw new Error("Login Failed: Cookie သက်တမ်းကုန်နေပါသည်။");
 
-                        // 💡 အမြင်အာရုံ (Selector) မစောင့်တော့ဘဲ Code ထဲမှ အတင်းရှာ၍ ထည့်ခြင်း 💡
+                        // 💡 ၁။ ID နှင့် Product ကို ရွေးချယ်ခြင်း 💡
                         const isProductClicked = await page.evaluate((uid, zid, pid) => {
-                            // ၁။ ID အကွက် အားလုံးကို ရှာပြီး ထည့်မည်
                             const idInputs = document.querySelectorAll('input[name="userid"], .userid');
                             const zoneInputs = document.querySelectorAll('input[name="zoneid"], .zoneid');
                             const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                             
-                            idInputs.forEach(inp => {
-                                setter.call(inp, uid);
-                                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                            });
-
-                            if (zid) {
-                                zoneInputs.forEach(inp => {
-                                    setter.call(inp, zid);
-                                    inp.dispatchEvent(new Event('input', { bubbles: true }));
-                                });
-                            }
+                            idInputs.forEach(inp => { setter.call(inp, uid); inp.dispatchEvent(new Event('input', { bubbles: true })); });
+                            if (zid) { zoneInputs.forEach(inp => { setter.call(inp, zid); inp.dispatchEvent(new Event('input', { bubbles: true })); }); }
                             
-                            // ၂။ 💡 Product အတိအကျကို နည်းလမ်းပေါင်းစုံဖြင့် ရှာဖွေခြင်း 💡
-                            const selectors = [
-                                `[productid="${pid}"]`,
-                                `[data-id="${pid}"]`,
-                                `[id="${pid}"]`,
-                                `li[productid="${pid}"]`,
-                                `.product-item[data-id="${pid}"]`
-                            ];
-                            
-                            let foundAndClicked = false;
+                            const selectors = [ `[productid="${pid}"]`, `[data-id="${pid}"]`, `[id="${pid}"]`, `li[productid="${pid}"]` ];
+                            let found = false;
                             for (let sel of selectors) {
                                 let el = document.querySelector(sel);
-                                if (el) {
-                                    el.click();
-                                    foundAndClicked = true;
-                                    break; // ရှာတွေ့လျှင် ရပ်မည်
-                                }
+                                if (el) { el.click(); found = true; break; }
                             }
-                            return foundAndClicked;
+                            return found;
                         }, userId, zoneId, productData.smileId);
 
-                        // 💡 ပစ္စည်းကို မတွေ့ပါက ချက်ချင်း Error ပြမည် 💡
                         if (!isProductClicked) {
-                            throw new Error(`စာမျက်နှာပေါ်တွင် ပစ္စည်း (Smile ID: ${productData.smileId}) ကို ရှာမတွေ့ပါ။ စိန်ပမာဏ မှန်ကန်မှုရှိမရှိ စစ်ဆေးပါ။`);
+                            throw new Error(`ပစ္စည်း (Smile ID: ${productData.smileId}) ကို ရှာမတွေ့ပါ။`);
                         }
 
-                        await new Promise(r => setTimeout(r, 2000));
+                        await new Promise(r => setTimeout(r, 1500));
+
+                        // 💡 ၂။ Payment Method တွင် Smile Coin ကို ရှာ၍ အတင်းနှိပ်ခြင်း 💡
+                        await page.evaluate(() => {
+                            const paySelectors = [
+                                '[data-payway="smilecoin"]', 
+                                '[payid="smilecoin"]', 
+                                'li.smilecoin', 
+                                'img[src*="smilecoin"]'
+                            ];
+                            let clicked = false;
+                            for (let sel of paySelectors) {
+                                let el = document.querySelector(sel);
+                                if (el) { 
+                                    // ပုံကိုတွေ့လျှင် ၎င်း၏ အပြင်ဘက်ဆုံး Li သို့မဟုတ် Div ကို နှိပ်ရန်
+                                    let clickable = el.closest('li') || el.closest('.pay-item') || el;
+                                    clickable.click(); 
+                                    clicked = true; 
+                                    break; 
+                                }
+                            }
+                            // Text ဖြင့် အရန်ရှာဖွေခြင်း
+                            if (!clicked) {
+                                let allItems = document.querySelectorAll('li, div, span');
+                                for (let el of allItems) {
+                                    if (el.innerText && el.innerText.toLowerCase().includes('smile coin')) {
+                                        el.click();
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+
+                        await new Promise(r => setTimeout(r, 1500));
                         
-                        // ၃။ Buy နှိပ်ခြင်း
+                        // 💡 ၃။ Buy Now ကို နှိပ်ခြင်း 💡
                         await page.evaluate(() => {
                             let buyBtn = document.querySelector('.buy-btn, #buy_btn, .btn-pay');
                             if(buyBtn) buyBtn.click();
                         });
-                        console.log(`⏳ [${order.orderId}] ဝယ်ယူရန် နှိပ်လိုက်ပါပြီ။`);
+                        console.log(`⏳ [${order.orderId}] Payment ရွေးပြီး ဝယ်ယူရန် နှိပ်လိုက်ပါပြီ။`);
                         
                         await new Promise(r => setTimeout(r, 2000));
 
-                        // ၄။ 💡 အတည်ပြု (Confirm) ခလုတ် ထပ်ပေါ်လာပါက နှိပ်ပေးခြင်း 💡
+                        // 💡 ၄။ အတည်ပြု (Confirm) ခလုတ် ထပ်ပေါ်လာပါက နှိပ်ပေးခြင်း 💡
                         await page.evaluate(() => {
                             let confirmBtn = document.querySelector('.swal2-confirm, #confirm-btn, .confirm-pay');
                             if(confirmBtn) confirmBtn.click();
@@ -141,7 +151,6 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
                             return msg;
                         });
 
-                        // "success" မပါရင် ဒါမှမဟုတ် "Please select" လို Error မျိုးတွေ့ရင် ပိတ်ချမည်
                         if (uiMessage && !uiMessage.toLowerCase().includes('success') && !uiMessage.toLowerCase().includes('အောင်မြင်')) {
                             throw new Error(`Smile One: "${uiMessage}"`);
                         }
@@ -182,5 +191,6 @@ db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => 
     });
 });
 
-app.get('/', (req, res) => { res.send('✅ Kazeno Backend Strict V13 Active'); });
+app.get('/', (req, res) => { res.send('✅ Kazeno Backend V14 Active'); });
 app.listen(PORT, () => { console.log(`Server running`); });
+
