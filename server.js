@@ -10,7 +10,7 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
-console.log("🚀 Kazeno Backend Server (Puppeteer Pro V8) စတင်လည်ပတ်နေပါပြီ...");
+console.log("🚀 Kazeno Backend Server (Puppeteer Pro V8) စတင်လည်ပတ်နေပါပြီ..."); 
 
 db.collection('orders').where('status', '==', 'Pending').onSnapshot(snapshot => {
     snapshot.docChanges().forEach(async (change) => {
